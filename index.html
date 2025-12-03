@@ -1,0 +1,307 @@
+<!--
+Notepad - WhatsApp-style Text Editor
+Filename: Notepad-WhatsApp-Style-Editor.html
+Author: Generated for Ibrahim Yakubu Khalil
+
+FEATURES
+- Single-file HTML/CSS/JS production-ready text editor (no build tools required)
+- WhatsApp-like message bubbles saved as messages (id, text, timestamp)
+- Autosave to localStorage with debounce
+- Manual Save / Export (JSON) / Import (JSON) / Clear all
+- Edit messages inline, delete messages, copy, share via Web Share API
+- Simple, responsive, clean UI optimized for mobile (looks like a notepad + chat)
+- Accessibility: keyboard support, ARIA labels
+- Lightweight and ready to deploy as a static site
+
+INSTRUCTIONS (short):
+- Open this file in your browser to run locally.
+- To deploy: create a new GitHub repo, upload this file, then connect the repo to Netlify (or use Netlify Drop).
+
+Below the interface is a short embedded guide "How to deploy using phone" accessible inside the app.
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Notepad — WhatsApp-style Text Editor</title>
+  <style>
+    :root{
+      --bg:#0f1724; --card:#0b1520; --accent:#10b981; --muted:#9aa4b2; --bubble:#052032; --me:#064e3b;
+      --glass: rgba(255,255,255,0.03);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#071026);color:#e6eef6}
+    .app{max-width:900px;margin:18px auto;padding:16px;display:grid;grid-template-rows:auto 1fr auto;gap:12px}
+    header{display:flex;align-items:center;gap:12px}
+    .logo{width:44px;height:44px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#06b6d4);display:flex;align-items:center;justify-content:center;font-weight:700}
+    h1{font-size:18px;margin:0}
+    p.subtitle{margin:0;color:var(--muted);font-size:13px}
+
+    .editor-card{background:linear-gradient(180deg,var(--card),#071226);border-radius:14px;padding:12px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
+    .messages{height:60vh;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px;border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.01),transparent)}
+
+    .msg{max-width:78%;padding:10px 12px;border-radius:12px;position:relative;font-size:15px;line-height:1.35}
+    .msg .meta{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted);margin-top:8px}
+    .msg.me{margin-left:auto;background:linear-gradient(180deg,var(--me),#065f4a);border-bottom-right-radius:4px}
+    .msg.theirs{margin-right:auto;background:linear-gradient(180deg,var(--bubble),#023047);border-bottom-left-radius:4px}
+
+    .controls{display:flex;gap:8px;align-items:center;padding:8px}
+    .controls textarea{flex:1;min-height:44px;max-height:160px;border-radius:10px;padding:8px 10px;background:var(--glass);border:1px solid rgba(255,255,255,0.03);color:inherit;resize:none}
+    .btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:10px 12px;border-radius:10px;cursor:pointer}
+    .btn.primary{background:var(--accent);color:#042018;border:none}
+    .small{font-size:13px;padding:8px 10px}
+
+    .toolbar{display:flex;gap:6px;align-items:center}
+    .meta-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .hint{color:var(--muted);font-size:13px}
+
+    footer{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:13px}
+
+    /* message actions */
+    .actions{position:absolute;top:6px;right:6px;display:flex;gap:6px}
+    .action{background:rgba(0,0,0,0.18);border-radius:6px;padding:6px;font-size:12px;cursor:pointer}
+
+    /* responsive tweaks */
+    @media (max-width:640px){.app{padding:10px}.messages{height:55vh}}
+
+    /* subtle focus */
+    textarea:focus{outline:3px solid rgba(16,185,129,0.12)}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="logo">NT</div>
+      <div>
+        <h1>Notepad — WhatsApp-style</h1>
+        <p class="subtitle">Save short notes like messages — autosaves, export/import, offline-ready</p>
+      </div>
+    </header>
+
+    <div class="editor-card">
+      <div class="meta-row">
+        <div class="hint">Messages: <span id="count">0</span></div>
+        <div class="toolbar">
+          <button class="btn small" id="exportBtn">Export</button>
+          <button class="btn small" id="importBtn">Import</button>
+          <input id="importFile" type="file" accept="application/json" style="display:none">
+          <button class="btn small" id="clearBtn">Clear</button>
+        </div>
+      </div>
+
+      <div id="messages" class="messages" aria-live="polite"></div>
+
+      <div class="controls" style="margin-top:10px">
+        <textarea id="input" placeholder="Type a note or message..." aria-label="Type a note"></textarea>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-left:8px">
+          <button class="btn primary" id="sendBtn" title="Save note (Ctrl+Enter)">Save</button>
+          <button class="btn" id="toggleMode">Toggle Me/Theirs</button>
+        </div>
+      </div>
+
+    </div>
+
+    <footer>
+      <div>Autosave <span id="autosaveStatus">— ready</span></div>
+      <div>Local only • <button class="btn small" id="showGuide">How to deploy</button></div>
+    </footer>
+
+    <!-- Hidden modal for instructions -->
+    <dialog id="guide" style="border-radius:12px;padding:16px;background:linear-gradient(180deg,#04131a,#061c27);color:inherit;border:none;max-width:520px;width:94%">
+      <h3 style="margin-top:0">Deploy from your phone — quick steps</h3>
+      <ol>
+        <li>Create a GitHub account (if you don't have one). Install GitHub app or use mobile browser.</li>
+        <li>Create a new repository named <code>notepad-ws</code>. Choose public/private. Leave README unchecked.</li>
+        <li>Upload this file (<code>Notepad-WhatsApp-Style-Editor.html</code>) using "Add file" &gt; "Upload files" in the GitHub website or app. Commit.</li>
+        <li>Open Netlify.com on mobile, sign up with GitHub, and choose "New site from Git" &gt; connect your repo &gt; branch: main &gt; deploy. (No build command needed.)</li>
+        <li>Or use Netlify Drop: open netlify.app/drop and upload the single HTML file directly (fastest on mobile).</li>
+      </ol>
+      <p style="color:var(--muted)">Tip: use the GitHub mobile web UI to upload the file, or use the GitHub app's repository file editor. Netlify will publish a URL you can share.</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button id="closeGuide" class="btn">Close</button>
+      </div>
+    </dialog>
+
+  </div>
+
+  <script>
+    // Minimal production-style JS (no libs). Keep features clear and small.
+    (function(){
+      // Utilities
+      const $ = sel => document.querySelector(sel);
+      const qs = sel => document.querySelectorAll(sel);
+      const messagesEl = $('#messages');
+      const input = $('#input');
+      const sendBtn = $('#sendBtn');
+      const exportBtn = $('#exportBtn');
+      const importBtn = $('#importBtn');
+      const importFile = $('#importFile');
+      const clearBtn = $('#clearBtn');
+      const autosaveStatus = $('#autosaveStatus');
+      const countEl = $('#count');
+      const guide = $('#guide');
+      const showGuide = $('#showGuide');
+      const closeGuide = $('#closeGuide');
+      const toggleMode = $('#toggleMode');
+
+      let mode = 'me'; // or 'theirs'
+
+      // Message store structure: { id, text, ts }
+      const STORE_KEY = 'notepad_ws_messages_v1';
+      let messages = loadMessages();
+
+      // Debounce helper
+      function debounce(fn, wait){let t; return (...a)=>{clearTimeout(t);t=setTimeout(()=>fn.apply(this,a),wait)}}
+
+      function saveMessages(){
+        localStorage.setItem(STORE_KEY, JSON.stringify(messages));
+        autosaveStatus.textContent = 'saved ' + new Date().toLocaleTimeString();
+      }
+      const debouncedSave = debounce(saveMessages, 550);
+
+      function loadMessages(){
+        try{
+          const raw = localStorage.getItem(STORE_KEY);
+          return raw? JSON.parse(raw): [];
+        }catch(e){console.error('load failed',e);return []}
+      }
+
+      function render(){
+        messagesEl.innerHTML='';
+        messages.forEach(msg=>{
+          const div = document.createElement('div');
+          div.className = 'msg ' + (msg.direction === 'me' ? 'me' : 'theirs');
+          div.setAttribute('data-id', msg.id);
+
+          const textNode = document.createElement('div');
+          textNode.className='text';
+          textNode.textContent = msg.text;
+          textNode.contentEditable = true;
+          textNode.setAttribute('role','textbox');
+          textNode.setAttribute('aria-label','Edit message');
+
+          // actions
+          const actions = document.createElement('div');
+          actions.className='actions';
+
+          const copy = el('button','action'); copy.title='Copy'; copy.textContent='📋';
+          const del = el('button','action'); del.title='Delete'; del.textContent='🗑️';
+          const share = el('button','action'); share.title='Share'; share.textContent='🔗';
+
+          copy.onclick = ()=>{navigator.clipboard?.writeText(msg.text).then(()=>flash('Copied'))}
+          del.onclick = ()=>{ if(confirm('Delete this note?')){ messages = messages.filter(m=>m.id!==msg.id); debouncedSave(); render(); flash('Deleted') }}
+          share.onclick = ()=>{ if(navigator.share){navigator.share({text: msg.text}).catch(()=>flash('Share failed'))}else{navigator.clipboard?.writeText(msg.text).then(()=>flash('Copied'))} }
+
+          actions.appendChild(copy); actions.appendChild(share); actions.appendChild(del);
+
+          const meta = document.createElement('div'); meta.className='meta';
+          const time = new Date(msg.ts).toLocaleString();
+          meta.innerHTML = '<span style="opacity:.9">' + time + '</span>';
+
+          // assemble
+          div.appendChild(textNode);
+          div.appendChild(actions);
+          div.appendChild(meta);
+          messagesEl.appendChild(div);
+
+          // inline edit handling
+          let editTimer;
+          textNode.addEventListener('input', ()=>{
+            // update underlying message object live but debounce saving
+            msg.text = textNode.textContent;
+            autosaveStatus.textContent = 'editing...';
+            clearTimeout(editTimer);
+            editTimer = setTimeout(()=>{debouncedSave(); flash('Saved')}, 700);
+          });
+        });
+
+        countEl.textContent = messages.length;
+        // scroll to bottom
+        setTimeout(()=>{messagesEl.scrollTop = messagesEl.scrollHeight},50);
+      }
+
+      function el(tag,cls){const e=document.createElement(tag);if(cls)e.className=cls;return e}
+
+      function flash(text){
+        autosaveStatus.textContent = text;
+        setTimeout(()=>{autosaveStatus.textContent = 'saved ' + new Date().toLocaleTimeString()},900);
+      }
+
+      // create message
+      function addMessage(text){
+        const id = 'm_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+        const msg = { id, text: text.trim(), ts: Date.now(), direction: mode };
+        if(!msg.text) return;
+        messages.push(msg);
+        debouncedSave();
+        render();
+      }
+
+      // wire up
+      sendBtn.addEventListener('click', ()=>{ addMessage(input.value); input.value=''; input.focus(); });
+      input.addEventListener('keydown', (e)=>{
+        if(e.key === 'Enter' && (e.ctrlKey || e.metaKey)){
+          e.preventDefault(); sendBtn.click();
+        }
+      });
+
+      exportBtn.addEventListener('click', ()=>{
+        const blob = new Blob([JSON.stringify(messages, null, 2)], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href=url; a.download='notepad_messages.json'; a.click(); URL.revokeObjectURL(url);
+        flash('Exported');
+      });
+
+      importBtn.addEventListener('click', ()=>importFile.click());
+      importFile.addEventListener('change', async (e)=>{
+        const f = e.target.files[0]; if(!f) return;
+        try{
+          const text = await f.text();
+          const data = JSON.parse(text);
+          if(Array.isArray(data)){
+            messages = data; saveMessages(); render(); flash('Imported');
+          }else flash('Invalid file');
+        }catch(err){flash('Import failed')}
+        importFile.value='';
+      });
+
+      clearBtn.addEventListener('click', ()=>{
+        if(confirm('Clear all notes? This cannot be undone.')){messages = []; saveMessages(); render(); flash('Cleared')}
+      });
+
+      showGuide.addEventListener('click', ()=>guide.showModal());
+      closeGuide.addEventListener('click', ()=>guide.close());
+
+      toggleMode.addEventListener('click', ()=>{ mode = mode === 'me' ? 'theirs' : 'me'; toggleMode.textContent = mode === 'me' ? 'Mode: Me' : 'Mode: Them'; flash('Mode: ' + mode) });
+      // init mode label
+      toggleMode.textContent = 'Mode: Me';
+
+      // initial render
+      render();
+
+      // autosave status updater
+      setInterval(()=>{ if(document.hasFocus()) autosaveStatus.textContent = 'saved ' + new Date().toLocaleTimeString() }, 60000);
+
+      // small accessibility focus
+      messagesEl.addEventListener('click', e=>{
+        const p = e.target.closest('.msg'); if(!p) return;
+        const id = p.getAttribute('data-id'); const msg = messages.find(m=>m.id===id);
+        if(msg) {
+          // focus editable text
+          const txt = p.querySelector('.text'); txt.focus();
+        }
+      });
+
+      // warn on leaving if unsaved? we autosave, so no prompt
+      window.addEventListener('storage', ()=>{ messages = loadMessages(); render(); });
+
+      // expose for debugging
+      window._Notepad = {messages, saveMessages, loadMessages, render};
+
+    })();
+  </script>
+</body>
+</html>
